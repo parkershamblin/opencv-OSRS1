@@ -4,7 +4,7 @@ This project was highly inspired, and uses code snippets and concepts from Learn
 
 Distinction:
 My project is unique ffrom the formentioned tutorial in game, dataset, and implementation, but with that being said, their tutorial was still
-fundamental in teaching me how to train my own cascade classifer model for object detection in RuneScape and I use severalof their code snippets
+fundamental in teaching me how to train my own cascade classifer model for object detection in RuneScape and I use several of their code snippets
 throughout this project.
 """
 
