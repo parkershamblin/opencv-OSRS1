@@ -3,7 +3,7 @@ Credits:
 This project was highly inspired, and uses code snippets and concepts from Learn Code By Gaming's "OpenCV Object Detection in Games" YouTube Playlist.
 
 Distinction:
-My project is unique ffrom the formentioned tutorial in game, dataset, and implementation, but with that being said, their tutorial was still
+My project is unique from the formentioned tutorial in game, dataset, and implementation, but with that being said, their tutorial was still
 fundamental in teaching me how to train my own cascade classifer model for object detection in RuneScape and I use several of their code snippets
 throughout this project.
 """
