@@ -1,4 +1,5 @@
 # opencv-OSRS
+(Project created in 2020 but reuploaded in 2022)
 This program automates cow farming in Old School RuneScape by leveraging OpenCV and a custom-trained cascade classifier model, which I trained on images of RuneScape gameplay. PyAutoGUI is used to interact with the game through mouse actions, while the image processing runs in real time.
 
 ## Demo:
