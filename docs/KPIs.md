@@ -2,7 +2,7 @@
 I’m rebuilding this Old School RuneScape computer vision bot while taking “Image Processing Fundamentals” with Professor Dimitry Goldgof at USF. The class is giving me ideas, and I’m trying them here.
 
 ### Course snapshot
-![Course overview](/img/image_processing_fundaementals_overview.jpg)
+![Course overview](img/image_processing_fundaementals_overview.jpg)
 
 ###  Demo
 ![opencv-OSRS-demo](img/opencv-OSRS-demo.gif)
