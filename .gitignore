@@ -2,4 +2,3 @@ cascade_classifier/opencv/*
 cascade_classifier/__pycache__/*
 opencv/*
 .vscode/*
-cascade_classifier/__pycache__/*
