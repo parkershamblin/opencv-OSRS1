@@ -13,12 +13,12 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 
 # initialize the WindowCapture class
-wincap = WindowCapture('Old School Runescape')
+wincap = WindowCapture('Old School RuneScape')
 
 # load the trained model
 cascade_cow = cv.CascadeClassifier('cascade/cascade.xml')
 # load an empty Vision class
-vision_cow = Vision(None)
+vision_cow = Vision()
 
 # this global variable is used to notify the main loop of when the bot
 # actions have completed
