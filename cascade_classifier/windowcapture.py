@@ -12,6 +12,7 @@ class WindowCapture:
     cropped_y = 0
     offset_x = 0
     offset_y = 0
+    window_name = None
 
     # constructor
     def __init__(self, window_name=None):
@@ -24,8 +25,26 @@ class WindowCapture:
             if not self.hwnd:
                 raise Exception('Window not found: {}'.format(window_name))
 
-        # get the window size
+        # store window name for potential re-finding
+        self.window_name = window_name
+        
+        # initialize window position (will be called again by refresh)
+        self._update_window_position()
+
+    def _update_window_position(self):
+        """
+        Internal method to update window position and size.
+        Handles multi-monitor setups by properly accounting for negative coordinates.
+        This is called in __init__ and can be called again if window moves.
+        """
+        # get the window size and position
+        # NOTE: On multi-monitor setups, left and top can be negative if the window
+        # is on a monitor positioned to the left of the primary monitor
+        if self.hwnd is None:
+            raise Exception('Window handle is None')
         window_rect = win32gui.GetWindowRect(self.hwnd)
+        
+        # window_rect is (left, top, right, bottom)
         self.w = window_rect[2] - window_rect[0]
         self.h = window_rect[3] - window_rect[1]
 
@@ -38,9 +57,19 @@ class WindowCapture:
         self.cropped_y = titlebar_pixels
 
         # set the cropped coordinates offset so we can translate screenshot
-        # images into actual screen positions
+        # images into actual screen positions.
+        # This correctly handles negative coordinates on multi-monitor setups.
         self.offset_x = window_rect[0] + self.cropped_x
         self.offset_y = window_rect[1] + self.cropped_y
+
+    def refresh_window_position(self):
+        """
+        Refresh the window position. Call this if the window moves between monitors
+        or if you're concerned about multi-monitor coordinate drift.
+        Safe to call frequently (e.g., every 60 frames) with minimal overhead.
+        """
+        self._update_window_position()
+
 
     def get_screenshot(self):
 
@@ -56,7 +85,9 @@ class WindowCapture:
         # convert the raw data into a format opencv can read
         #dataBitMap.SaveBitmapFile(cDC, 'debug.bmp')
         signedIntsArray = dataBitMap.GetBitmapBits(True)
-        img = np.fromstring(signedIntsArray, dtype='uint8')
+        # GetBitmapBits returns a bytes-like object; use frombuffer instead of
+        # the deprecated fromstring. Specify dtype as a numpy dtype.
+        img = np.frombuffer(signedIntsArray, dtype=np.uint8)
         img.shape = (self.h, self.w, 4)
 
         # free resources
@@ -89,10 +120,21 @@ class WindowCapture:
                 print(hex(hwnd), win32gui.GetWindowText(hwnd))
         win32gui.EnumWindows(winEnumHandler, None)
 
-    # translate a pixel position on a screenshot image to a pixel position on the screen.
-    # pos = (x, y)
-    # WARNING: if you move the window being captured after execution is started, this will
-    # return incorrect coordinates, because the window position is only calculated in
-    # the __init__ constructor.
     def get_screen_position(self, pos):
+        """
+        Translate a pixel position on a screenshot image to a pixel position on the screen.
+        
+        Args:
+            pos: tuple of (x, y) coordinates from the screenshot image
+            
+        Returns:
+            tuple of (screen_x, screen_y) in screen space
+            
+        Notes:
+            - On multi-monitor setups, screen coordinates can be negative if the monitor
+              is positioned to the left of the primary monitor. This method correctly
+              handles negative coordinates.
+            - If the window moves between monitors during execution, call refresh_window_position()
+              to update offsets, or it will return incorrect coordinates.
+        """
         return (pos[0] + self.offset_x, pos[1] + self.offset_y)
