@@ -14,8 +14,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 
 # initialize the WindowCapture class
+# Prefers RuneLite* and falls back to the official OSRS client.
 # Works on multi-monitor setups (including negative coordinates on secondary monitors)
-wincap = WindowCapture('Old School RuneScape')
+wincap = WindowCapture()
 
 # load the trained model
 cascade_cow = cv.CascadeClassifier('cascade/cascade.xml')
@@ -25,11 +26,6 @@ vision_cow = Vision()
 # this global variable is used to notify the main loop of when the bot
 # actions have completed
 is_bot_in_action = False
-
-# Counter for periodic window position refresh (multi-monitor safety)
-# Refresh every 60 frames to catch if window moves between monitors
-frame_count = 0
-REFRESH_WINDOW_INTERVAL = 60
 
 # Fullscreen transition detection and recovery
 consecutive_capture_failures = 0
@@ -121,13 +117,6 @@ def bot_actions(rectangles):
 loop_time = time()
 while(True):
 
-    # Periodically refresh window position for multi-monitor support
-    # This catches cases where the window moves between monitors
-    frame_count += 1
-    if frame_count >= REFRESH_WINDOW_INTERVAL:
-        wincap.refresh_window_position()
-        frame_count = 0
-
     # get an updated image of the game (handle capture failures gracefully)
     # Window capture may fail temporarily (e.g., when OSRS goes fullscreen)
     try:
@@ -144,10 +133,10 @@ while(True):
         # After MAX_CAPTURE_FAILURES_BEFORE_REINIT failures, try to reinitialize window
         # This handles fullscreen-to-windowed transitions
         if consecutive_capture_failures == MAX_CAPTURE_FAILURES_BEFORE_REINIT:
-            print('Max failures reached; attempting to reinitialize window capture...')
+            print('Max failures reached; attempting to refresh/re-find window capture...')
             try:
                 wincap.refresh_window_position()
-                print('Window reinitialized. Retrying capture.')
+                print('Window capture refreshed. Retrying capture.')
             except Exception as reinit_err:
                 print(f'Reinit failed: {reinit_err}')
         
@@ -183,10 +172,10 @@ while(True):
         if not globals().get('hotkeys_registered'):
             try:
                 keyboard.add_hotkey('f', _hotkey_save_positive)
-                keyboard.add_hotkey('d', _hotkey_save_negative)
+                keyboard.add_hotkey('g', _hotkey_save_negative)
                 keyboard.add_hotkey('q', _hotkey_quit)
                 globals()['hotkeys_registered'] = True
-                print('Global hotkeys registered: f (positive), d (negative), q (quit)')
+                print('Global hotkeys registered: f (positive), g (negative), q (quit)')
             except Exception as e:
                 print('Failed to register global hotkeys:', e)
     else:
@@ -226,7 +215,8 @@ while(True):
 
     # debug the loop rate
     try:
-        print('FPS {:.1f}'.format(1 / (time() - loop_time)))
+        # print('FPS {:.1f}'.format(1 / (time() - loop_time)))
+        pass
     except ZeroDivisionError:
         pass
     loop_time = time()
@@ -245,7 +235,7 @@ while(True):
     if quit_requested:
         cv.destroyAllWindows()
         break
-    # local keys for saving are disabled when using global hotkeys; use global f/d in collect mode
+    # local keys for saving are disabled when using global hotkeys; use global f/g in collect mode
 
 print('Done.')
 # cleanup hotkeys if registered

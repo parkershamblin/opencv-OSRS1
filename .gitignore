@@ -3,3 +3,4 @@ cascade_classifier/__pycache__/*
 opencv/*
 .vscode/*
 transcripts/*
+cascade_classifier/training_data_cows.zip
