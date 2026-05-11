@@ -3,6 +3,59 @@ import numpy as np
 
 
 class Vision:
+    def filter_rectangles(
+        self,
+        rectangles,
+        min_size=(55, 40),
+        aspect_ratio_range=(1.1, 2.2),
+        overlap_threshold=0.35,
+    ):
+        filtered = []
+
+        for (x, y, w, h) in rectangles:
+            if w < min_size[0] or h < min_size[1]:
+                continue
+
+            aspect_ratio = w / float(h)
+            if not aspect_ratio_range[0] <= aspect_ratio <= aspect_ratio_range[1]:
+                continue
+
+            filtered.append((int(x), int(y), int(w), int(h)))
+
+        return self.non_max_suppression(filtered, overlap_threshold)
+
+    def non_max_suppression(self, rectangles, overlap_threshold=0.35):
+        if len(rectangles) == 0:
+            return []
+
+        boxes = np.asarray(rectangles, dtype=np.float32)
+        x1 = boxes[:, 0]
+        y1 = boxes[:, 1]
+        x2 = boxes[:, 0] + boxes[:, 2]
+        y2 = boxes[:, 1] + boxes[:, 3]
+        area = boxes[:, 2] * boxes[:, 3]
+        order = area.argsort()
+        picked = []
+
+        while len(order) > 0:
+            i = order[-1]
+            picked.append(i)
+            order = order[:-1]
+
+            if len(order) == 0:
+                break
+
+            xx1 = np.maximum(x1[i], x1[order])
+            yy1 = np.maximum(y1[i], y1[order])
+            xx2 = np.minimum(x2[i], x2[order])
+            yy2 = np.minimum(y2[i], y2[order])
+
+            w = np.maximum(0, xx2 - xx1)
+            h = np.maximum(0, yy2 - yy1)
+            overlap = (w * h) / area[order]
+            order = order[overlap <= overlap_threshold]
+
+        return boxes[picked].astype(np.int32).tolist()
 
     # given a list of [x, y, w, h] rectangles returned by find(), convert those into a list of
     # [x, y] positions in the center of those rectangles where we can click on those found items

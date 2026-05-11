@@ -27,7 +27,7 @@ class WindowCapture:
     window_name = None
 
     # constructor
-    def __init__(self, window_name=_AUTO_WINDOW, capture_from_screen=True):
+    def __init__(self, window_name=_AUTO_WINDOW, capture_from_screen=False):
         # find the handle for the window we want to capture.
         # by default, prefer RuneLite windows and fall back to the official client
         self._auto_find_window = (
@@ -43,6 +43,7 @@ class WindowCapture:
         elif window_name is None:
             self.hwnd = win32gui.GetDesktopWindow()
             self.window_name = window_name
+            self._capture_from_screen = True
         else:
             hwnd = win32gui.FindWindow(None, window_name)
             if not hwnd:
@@ -160,13 +161,8 @@ class WindowCapture:
         self._update_window_position()
 
 
-    def get_screenshot(self):
-        # Update every frame so fullscreen/windowed transitions and stretched
-        # client-size changes are handled immediately.
-        self._update_window_position()
-
-        # get the window image data
-        if self._capture_from_screen:
+    def _grab_bitmap_bits(self, capture_from_screen):
+        if capture_from_screen:
             wDC = win32gui.GetDC(0)
             release_hwnd = 0
             source_pos = (self.offset_x, self.offset_y)
@@ -206,6 +202,20 @@ class WindowCapture:
             win32gui.ReleaseDC(release_hwnd, wDC)
             if dataBitMap is not None:
                 win32gui.DeleteObject(dataBitMap.GetHandle())
+
+        return signedIntsArray
+
+    def get_screenshot(self):
+        # Update every frame so fullscreen/windowed transitions and stretched
+        # client-size changes are handled immediately.
+        self._update_window_position()
+
+        try:
+            signedIntsArray = self._grab_bitmap_bits(self._capture_from_screen)
+        except Exception:
+            if self._capture_from_screen:
+                raise
+            signedIntsArray = self._grab_bitmap_bits(True)
 
         # GetBitmapBits returns a bytes-like object; use frombuffer instead of
         # the deprecated fromstring. Specify dtype as a numpy dtype.
