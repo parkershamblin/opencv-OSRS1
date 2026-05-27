@@ -15,6 +15,13 @@ class WindowCapture:
     TOP_EDGE_ARTIFACT_MIN_BRIGHT_RATIO = 0.65
     TOP_EDGE_ARTIFACT_MIN_LUMA = 170
     TOP_EDGE_ARTIFACT_MAX_CHANNEL_SPREAD = 55
+    BLACK_PADDING_MAX_CHANNEL_VALUE = 10
+    BLACK_PADDING_MIN_EDGE_TRIM_PIXELS = 16
+    BLACK_PADDING_MIN_EDGE_TRIM_RATIO = 0.02
+    CONTENT_EDGE_MIN_RATIO = 0.08
+    CONTENT_EDGE_MIN_RUN = 8
+    CONTENT_EDGE_MIN_RUN_RATIO = 0.75
+    MIN_CONTENT_SIZE = (300, 200)
 
     # properties
     w = 0
@@ -22,12 +29,14 @@ class WindowCapture:
     hwnd: int | None = None
     cropped_x = 0
     cropped_y = 0
+    capture_w = 0
+    capture_h = 0
     offset_x = 0
     offset_y = 0
     window_name = None
 
     # constructor
-    def __init__(self, window_name=_AUTO_WINDOW, capture_from_screen=False):
+    def __init__(self, window_name=_AUTO_WINDOW, capture_from_screen=False, trim_black_padding=False):
         # find the handle for the window we want to capture.
         # by default, prefer RuneLite windows and fall back to the official client
         self._auto_find_window = (
@@ -35,6 +44,7 @@ class WindowCapture:
         )
         self._capture_desktop = window_name is None
         self._capture_from_screen = capture_from_screen
+        self._trim_black_padding = trim_black_padding
         self._last_top_trim = 0
 
         if window_name is _AUTO_WINDOW or window_name == self.OSRS_WINDOW_TITLE:
@@ -107,6 +117,8 @@ class WindowCapture:
             self.h = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
             self.cropped_x = 0
             self.cropped_y = 0
+            self.capture_w = self.w
+            self.capture_h = self.h
             return
 
         self._ensure_window_handle()
@@ -129,6 +141,8 @@ class WindowCapture:
         # decorated windowed mode and borderless/fullscreen plugin modes.
         self.cropped_x = 0
         self.cropped_y = 0
+        self.capture_w = self.w
+        self.capture_h = self.h
 
         # set the client coordinates offset so we can translate screenshot
         # images into actual screen positions.
@@ -229,8 +243,19 @@ class WindowCapture:
 
         top_trim = self._find_top_resize_artifact_height(img)
         self._last_top_trim = top_trim
+        self.cropped_x = 0
+        self.cropped_y = top_trim
         if top_trim:
             img = img[top_trim:, :, :]
+
+        if self._trim_black_padding and not self._capture_desktop:
+            left, top, right, bottom = self._find_client_content_bounds(img)
+            if (left, top, right, bottom) != (0, 0, img.shape[1], img.shape[0]):
+                img = img[top:bottom, left:right, :]
+                self.cropped_x += left
+                self.cropped_y += top
+
+        self.capture_h, self.capture_w = img.shape[:2]
 
         # make image C_CONTIGUOUS to avoid errors that look like:
         #   File ... in draw_rectangles
@@ -240,6 +265,84 @@ class WindowCapture:
         img = np.ascontiguousarray(img)
 
         return img
+
+    @classmethod
+    def _find_client_content_bounds(cls, img):
+        """
+        Find the rendered gameplay area inside a RuneLite client capture.
+
+        RuneLite can leave unused black canvas around the game image while the
+        client is larger than the rendered scene. The padding sometimes contains
+        a few stale pixels, so this looks for sustained non-black content rather
+        than requiring perfectly solid black borders.
+        """
+        height, width = img.shape[:2]
+        if width == 0 or height == 0:
+            return 0, 0, width, height
+
+        content_pixels = np.max(img, axis=2) > cls.BLACK_PADDING_MAX_CHANNEL_VALUE
+        row_content_ratio = np.mean(content_pixels, axis=1)
+        col_content_ratio = np.mean(content_pixels, axis=0)
+
+        top, bottom = cls._find_axis_content_bounds(row_content_ratio, height)
+        left, right = cls._find_axis_content_bounds(col_content_ratio, width)
+
+        min_width, min_height = cls.MIN_CONTENT_SIZE
+        if right - left < min_width or bottom - top < min_height:
+            return 0, 0, width, height
+
+        return left, top, right, bottom
+
+    @classmethod
+    def _find_axis_content_bounds(cls, content_ratio, axis_size):
+        content = content_ratio >= cls.CONTENT_EDGE_MIN_RATIO
+        run_size = min(cls.CONTENT_EDGE_MIN_RUN, axis_size)
+        if run_size <= 1:
+            content_indices = np.flatnonzero(content)
+            if len(content_indices) == 0:
+                return 0, axis_size
+            start = int(content_indices[0])
+            end = int(content_indices[-1]) + 1
+            return cls._keep_small_edge_trim(start, end, axis_size)
+
+        required_hits = max(1, int(np.ceil(run_size * cls.CONTENT_EDGE_MIN_RUN_RATIO)))
+        run_hits = np.convolve(
+            content.astype(np.uint8),
+            np.ones(run_size, dtype=np.uint8),
+            mode='valid',
+        )
+        valid_runs = np.flatnonzero(run_hits >= required_hits)
+        if len(valid_runs) == 0:
+            return 0, axis_size
+
+        start = int(valid_runs[0])
+        end = int(valid_runs[-1]) + run_size
+
+        region_content_indices = np.flatnonzero(content[start:end])
+        if len(region_content_indices) == 0:
+            return 0, axis_size
+        region_start = start
+        start = region_start + int(region_content_indices[0])
+        end = region_start + int(region_content_indices[-1]) + 1
+
+        while start > 0 and content[start - 1]:
+            start -= 1
+        while end < axis_size and content[end]:
+            end += 1
+
+        return cls._keep_small_edge_trim(start, end, axis_size)
+
+    @classmethod
+    def _keep_small_edge_trim(cls, start, end, axis_size):
+        min_trim = max(
+            cls.BLACK_PADDING_MIN_EDGE_TRIM_PIXELS,
+            round(axis_size * cls.BLACK_PADDING_MIN_EDGE_TRIM_RATIO),
+        )
+        if start < min_trim:
+            start = 0
+        if axis_size - end < min_trim:
+            end = axis_size
+        return start, end
 
     @classmethod
     def _find_top_resize_artifact_height(cls, img):
@@ -294,4 +397,4 @@ class WindowCapture:
             - If the window moves between monitors during execution, call refresh_window_position()
               to update offsets, or it will return incorrect coordinates.
         """
-        return (pos[0] + self.offset_x, pos[1] + self.offset_y + self._last_top_trim)
+        return (pos[0] + self.offset_x + self.cropped_x, pos[1] + self.offset_y + self.cropped_y)

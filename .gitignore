@@ -1,6 +1,12 @@
-cascade_classifier/opencv/*
-cascade_classifier/__pycache__/*
-opencv/*
-.vscode/*
-transcripts/*
+cascade_classifier/opencv/
+cascade_classifier/__pycache__/
+
+opencv/
+opencv_build/
+
+.vscode/
+transcripts/
+video-logs/
+
 cascade_classifier/training_data_cows.zip
+*.mp4

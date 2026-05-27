@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -24,6 +25,10 @@ RECOMMENDED_POSITIVE_BOXES = 150
 DEFAULT_NUM_STAGES = 14
 DEFAULT_FEATURE_TYPE = 'LBP'
 DEFAULT_MAX_FALSE_ALARM_RATE = 0.25
+ANNOTATION_MAX_WINDOW_HEIGHT = 650
+ANNOTATION_RESIZE_FACTOR = 2
+ANNOTATION_WINDOW_POLL_SECONDS = 0.25
+ANNOTATION_WINDOW_RECT_TOLERANCE = 8
 IMAGE_EXTENSIONS = {'.bmp', '.jpeg', '.jpg', '.png'}
 HARD_NEGATIVE_PREFIX = 'hardneg_'
 UI_NEGATIVE_REGIONS = [
@@ -404,11 +409,30 @@ def validate_training_files():
 
 
 def build_opencv_apps():
+    existing_apps = [
+        find_opencv_executable('opencv_annotation'),
+        find_opencv_executable('opencv_createsamples'),
+        find_opencv_executable('opencv_traincascade'),
+    ]
+    if all(existing_apps):
+        print('OpenCV cascade apps are already available:')
+        for app in existing_apps:
+            print(f'  {app}')
+        print('Skipping rebuild.')
+        return
+
     if not OPENCV_SOURCE_DIR.exists():
         raise RuntimeError(f'OpenCV source directory not found: {OPENCV_SOURCE_DIR}')
 
+    cmake = shutil.which('cmake')
+    if cmake is None:
+        raise RuntimeError(
+            'cmake was not found on PATH. Install it in this environment with '
+            '"conda install -c conda-forge cmake" or add CMake to PATH, then retry.'
+        )
+
     configure_cmd = [
-        'cmake',
+        cmake,
         '-S',
         str(OPENCV_SOURCE_DIR),
         '-B',
@@ -439,7 +463,7 @@ def build_opencv_apps():
     subprocess.run(configure_cmd, cwd=REPO_DIR, check=True)
 
     build_cmd = [
-        'cmake',
+        cmake,
         '--build',
         str(OPENCV_APPS_BUILD_DIR),
         '--config',
@@ -457,10 +481,117 @@ def run_annotation():
     if annotation is None:
         raise RuntimeError('opencv_annotation executable not found. Run --build-apps first.')
 
-    subprocess.run(
-        [annotation, f'--annotations={POS_FILE}', f'--images={POSITIVE_DIR}/'],
+    process = subprocess.Popen(
+        [
+            annotation,
+            f'--annotations={POS_FILE}',
+            f'--images={POSITIVE_DIR}/',
+            f'--maxWindowHeight={ANNOTATION_MAX_WINDOW_HEIGHT}',
+            f'--resizeFactor={ANNOTATION_RESIZE_FACTOR}',
+        ],
         cwd=DATASET_DIR,
-        check=True,
+    )
+    keep_annotation_window_position_usable(process)
+    return_code = process.wait()
+    if return_code:
+        raise subprocess.CalledProcessError(return_code, process.args)
+
+
+def keep_annotation_window_position_usable(process):
+    if os.name != 'nt':
+        return
+
+    try:
+        import win32api
+        import win32con
+        import win32gui
+        import win32process
+    except ImportError:
+        print('pywin32 is unavailable; annotation window placement will not be managed.')
+        return
+
+    managed_hwnd = None
+
+    while process.poll() is None:
+        hwnd = find_process_window(process.pid, win32gui, win32process)
+        if hwnd is None:
+            time.sleep(ANNOTATION_WINDOW_POLL_SECONDS)
+            continue
+
+        current_rect = win32gui.GetWindowRect(hwnd)
+        work_rect = monitor_work_rect(hwnd, win32api, win32con)
+
+        if hwnd != managed_hwnd or window_position_needs_correction(current_rect, work_rect):
+            left, top = centered_annotation_position(current_rect, work_rect)
+            apply_window_position(hwnd, left, top, win32gui, win32con)
+            managed_hwnd = hwnd
+
+        time.sleep(ANNOTATION_WINDOW_POLL_SECONDS)
+
+
+def find_process_window(pid, win32gui, win32process):
+    windows = []
+
+    def enum_handler(hwnd, ctx):
+        if not win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
+            return
+        _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+        if window_pid != pid:
+            return
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        width = right - left
+        height = bottom - top
+        if width > 100 and height > 100:
+            ctx.append((width * height, hwnd))
+
+    win32gui.EnumWindows(enum_handler, windows)
+    if not windows:
+        return None
+
+    return max(windows)[1]
+
+
+def monitor_work_rect(hwnd, win32api, win32con):
+    monitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+    return win32api.GetMonitorInfo(monitor)['Work']
+
+
+def centered_annotation_position(rect, work_rect):
+    left, top, right, bottom = rect
+    width = right - left
+    height = bottom - top
+
+    work_left, work_top, work_right, work_bottom = work_rect
+    work_width = work_right - work_left
+    work_height = work_bottom - work_top
+
+    left = work_left + max(0, (work_width - width) // 2)
+    top = work_top + max(0, (work_height - height) // 2)
+    return left, top
+
+
+def window_position_needs_correction(rect, work_rect):
+    left, top, right, bottom = rect
+    work_left, work_top, work_right, work_bottom = work_rect
+    tolerance = ANNOTATION_WINDOW_RECT_TOLERANCE
+
+    return (
+        left < work_left - tolerance
+        or top < work_top - tolerance
+        or right > work_right + tolerance
+        or bottom > work_bottom + tolerance
+    )
+
+
+def apply_window_position(hwnd, left, top, win32gui, win32con):
+    win32gui.SetWindowPos(
+        hwnd,
+        None,
+        left,
+        top,
+        0,
+        0,
+        win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE | win32con.SWP_NOSIZE,
     )
 
 
@@ -581,13 +712,30 @@ def train_cascade(
 
 
 def print_commands():
+    # Non-static: discover available cascade models in the dataset directory
     print('Adult cow cascade workflow:')
     print('1. python cascadeutils.py --build-apps')
-    print('2. python cascadeutils.py --dataset fixed_zoom_v1 --annotate')
-    print('3. python cascadeutils.py --dataset fixed_zoom_v1 --generate-neg')
-    print('4. python cascadeutils.py --dataset fixed_zoom_v1 --generate-hard-negatives')
-    print('5. python cascadeutils.py --dataset fixed_zoom_v1 --generate-vec --num 225 --window-width 80 --window-height 64')
-    print('6. python cascadeutils.py --dataset fixed_zoom_v1 --train --cascade-dir cascade_adult_cow_fixed_zoom_v1 --num-pos 200 --clean-output')
+    print('2. python cascadeutils.py --dataset <dataset> --annotate')
+    print('3. python cascadeutils.py --dataset <dataset> --generate-neg')
+    print('4. python cascadeutils.py --dataset <dataset> --generate-hard-negatives')
+    print('5. python cascadeutils.py --dataset <dataset> --generate-vec --num <n> --window-width <w> --window-height <h>')
+    print('6. python cascadeutils.py --dataset <dataset> --train --cascade-dir <cascade-dir> --num-pos <n> --clean-output')
+    print('')
+    print('Available cascade models found:')
+    found = []
+    # look for cascade directories or xml files in the base dataset dir
+    for p in sorted(BASE_DIR.iterdir()):
+        if p.is_dir() and p.name.startswith('cascade_'):
+            found.append(p.name)
+        if p.is_file() and p.suffix.lower() == '.xml' and 'cascade' in p.name.lower():
+            found.append(p.name)
+
+    if not found:
+        print('  (none found in', str(BASE_DIR) + ')')
+    else:
+        for name in found:
+            print('  ', name)
+
     print('')
     print('Annotation rule: boxes must cover whole visible adult cow bodies.')
     print('Do not label sheep, baby cows, NPCs, fences, hooves-only, or body fragments as positives.')

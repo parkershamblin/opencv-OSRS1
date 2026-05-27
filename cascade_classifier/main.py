@@ -18,14 +18,20 @@ TRAINING_DIR = REPO_DIR / 'training'
 DEFAULT_COLLECT_DATASET = 'fixed_zoom_v1'
 
 
-def _env_flag(name):
-    return os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes', 'on')
+def _env_flag(name, default=False):
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 # initialize the WindowCapture class
 # Prefers RuneLite* and falls back to the official OSRS client.
 # Works on multi-monitor setups (including negative coordinates on secondary monitors)
-wincap = WindowCapture(capture_from_screen=_env_flag('OSRS_CAPTURE_FROM_SCREEN'))
+wincap = WindowCapture(
+    capture_from_screen=_env_flag('OSRS_CAPTURE_FROM_SCREEN', default=True),
+    trim_black_padding=True,
+)
 
 def _discover_cascade_paths():
     paths = [path for path in Path('.').glob('cascade*/cascade.xml') if path.is_file()]
@@ -170,6 +176,7 @@ PREVIEW_MAX_HEIGHT = 540
 PREVIEW_SCREEN_FRACTION = 0.55
 PREVIEW_WINDOW_MARGIN = 24
 preview_window_initialized = False
+preview_window_size = None
 
 # this global variable is used to notify the main loop of when the bot
 # actions have completed
@@ -232,10 +239,10 @@ def _preview_size_for_frame(frame):
 def _preview_window_position(preview_width, preview_height):
     try:
         screen_width, screen_height = pyautogui.size()
-        game_left = max(0, wincap.offset_x)
-        game_top = max(0, wincap.offset_y)
-        game_right = game_left + wincap.w
-        game_bottom = game_top + wincap.h
+        game_left = max(0, wincap.offset_x + wincap.cropped_x)
+        game_top = max(0, wincap.offset_y + wincap.cropped_y)
+        game_right = game_left + (wincap.capture_w or wincap.w)
+        game_bottom = game_top + (wincap.capture_h or wincap.h)
 
         candidates = [
             (game_right + PREVIEW_WINDOW_MARGIN, game_top),
@@ -265,7 +272,7 @@ def _preview_window_position(preview_width, preview_height):
 
 
 def _initialize_preview_window(frame):
-    global preview_window_initialized
+    global preview_window_initialized, preview_window_size
     if preview_window_initialized:
         return
 
@@ -276,14 +283,22 @@ def _initialize_preview_window(frame):
 
     preview_width, preview_height = _preview_size_for_frame(frame)
     cv.resizeWindow(MATCHES_WINDOW_NAME, preview_width, preview_height)
+    preview_window_size = (preview_width, preview_height)
     x, y = _preview_window_position(preview_width, preview_height)
     cv.moveWindow(MATCHES_WINDOW_NAME, x, y)
     preview_window_initialized = True
 
 
 def show_preview(frame):
+    global preview_window_size
+
     _initialize_preview_window(frame)
     preview_width, preview_height = _preview_size_for_frame(frame)
+    preview_size = (preview_width, preview_height)
+    if preview_window_size != preview_size:
+        cv.resizeWindow(MATCHES_WINDOW_NAME, preview_width, preview_height)
+        preview_window_size = preview_size
+
     if frame.shape[1] != preview_width or frame.shape[0] != preview_height:
         frame = cv.resize(frame, (preview_width, preview_height), interpolation=cv.INTER_AREA)
     cv.imshow(MATCHES_WINDOW_NAME, frame)
@@ -439,7 +454,7 @@ while(True):
                 detection_image,
                 f'detections: {len(rectangles)}',
                 (10, 30),
-                cv.FONT_HERSHEY_SIMPLEX,
+                cv.COLORMAP_DEEPGREEN,
                 0.7,
                 (0, 255, 0),
                 2,
@@ -448,7 +463,7 @@ while(True):
             # Add status overlay if capture is failing
             if consecutive_capture_failures > 0:
                 cv.putText(detection_image, f'CAPTURE FAILING ({consecutive_capture_failures})', 
-                          (10, 30), cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                          (10, 30), cv.COLORMAP_DEEPGREEN, 0.7, (0, 0, 255), 2)
             
             # display the images
             show_preview(detection_image)
