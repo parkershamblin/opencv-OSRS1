@@ -11,6 +11,12 @@ This is an experiment, not a polished bot. It has hard-coded assumptions, no aut
 
 Automation may violate game rules. Use it at your own risk.
 
+## Portfolio Case Study
+
+Read the companion portfolio write-up:
+
+[Parker Shamblin OpenCV Project | Python Computer Vision Workflow](https://parkershamblin.com/blog/parker-shamblin-opencv-computer-vision-project)
+
 ## Demo
 ![opencv-OSRS-demo](docs/img/opencv-OSRS-demo.gif)
 
